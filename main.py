@@ -193,7 +193,6 @@ with Stealth().use_sync(sync_playwright()) as p:
             pl.col("Symbool | ISIN").str.split("|").list.get(index=1, null_on_oob=True)
         )
     )
-    # .filter(pl.col("Symbool | ISIN")=="0YU | US98850P1093")
 
     isins: list[str] = [
         isin[0]
