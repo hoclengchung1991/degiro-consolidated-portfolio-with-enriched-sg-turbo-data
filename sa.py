@@ -73,7 +73,7 @@ for inbox in inboxes['data']:
                         page.get_by_text("Accept All Cookies",exact=True).click()
                         try:
                             while True:
-                                time.sleep(2)
+                                time.sleep(60)
                         except KeyboardInterrupt:
                                 browser.close()
                         
