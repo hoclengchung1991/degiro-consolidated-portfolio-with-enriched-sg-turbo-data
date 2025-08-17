@@ -1151,6 +1151,20 @@ pure-eval = "*"
 tests = ["cython", "littleutils", "pygments", "pytest", "typeguard"]
 
 [[package]]
+name = "temp-mail-so"
+version = "1.0.2"
+description = "A Python SDK for TempMail.so temporary email service"
+optional = false
+python-versions = ">=3.6"
+files = [
+    {file = "temp-mail-so-1.0.2.tar.gz", hash = "sha256:104d44d6280f8559f4d611814d96491ff7c0cac569d0090ebff1610afdc8f93c"},
+    {file = "temp_mail_so-1.0.2-py3-none-any.whl", hash = "sha256:ced586f6536422fb4027f6459e79d583812443a1c8b7523dd1db91c5e3dafbd1"},
+]
+
+[package.dependencies]
+requests = ">=2.25.1"
+
+[[package]]
 name = "traitlets"
 version = "5.14.3"
 description = "Traitlets Python configuration system"
@@ -1254,4 +1268,4 @@ files = [
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.12"
-content-hash = "09b3b57815b9fbd00b37eb6fddc576a9e24d76a1dc2d51d34391f4aa115aeb1c"
+content-hash = "1f1ca0d7e4a5cc157e8d50a6e4283d39ece23d86d98f606e48bb9638ed29d547"
