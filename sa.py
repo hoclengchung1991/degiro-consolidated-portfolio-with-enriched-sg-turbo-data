@@ -1,9 +1,23 @@
 from temp_mail_so import TempMailSo
+import logging
 from pydantic_settings import BaseSettings, SettingsConfigDict
 import random,re,time
 from playwright.sync_api import sync_playwright
 from playwright_stealth import Stealth
 from bs4 import BeautifulSoup
+# importing module
+import logging
+
+# Create and configure logger
+logging.basicConfig(
+                    format='%(asctime)s %(message)s',
+                    )
+
+# Creating an object
+logger = logging.getLogger()
+
+
+
 num: int = random.randint(1_000_001, 10_000_000)
 pattern = r'https://seekingalpha\.com/auth/registrations/validate/[^\s"\']*&open_reset_password=true\b'
 seeking_alpha_url = input("Enter SA article URL: ")
@@ -30,7 +44,7 @@ inbox = client.create_inbox(
     domain=first_listed_domain,  # Domain
     lifespan=300  # Inbox lifespan in seconds (0 for permanent)
 )
-
+logger.setLevel(logging.INFO)
 #list available inboxes
 inboxes = client.list_inboxes()
 for inbox in inboxes['data']:
@@ -46,19 +60,20 @@ for inbox in inboxes['data']:
             emails = client.list_emails(inbox_id=inbox_id)
             while not emails["data"]:
                 emails = client.list_emails(inbox_id=inbox_id)
+                logger.info(f"Listing emails...")
                 if emails["data"]:
                     email_id = emails["data"][0]["id"]
                     email = client.get_email(inbox_id=inbox_id,email_id=email_id)
                     match = re.search(pattern, email["data"]["htmlContent"])
                     if match:
                         url = match.group(0)                        
-                        page.goto(url)
-                        print(url)
+                        logger.info(f"received mail uri: {url}")
+                        page.goto(url)                        
                         page.get_by_text("Cancel", exact=True).click()
                         page.get_by_text("Accept All Cookies",exact=True).click()
                         try:
                             while True:
-                                time.sleep(10)
+                                time.sleep(2)
                         except KeyboardInterrupt:
                                 browser.close()
                         
