@@ -51,8 +51,8 @@ for inbox in inboxes['data']:
     if temp_email_prefix in inbox["name"]:
         inbox_id = inbox["id"]
         with Stealth().use_sync(sync_playwright()) as p:
-            browser = p.chromium.launch(headless=False)
-            context = browser.new_context(viewport={"width": 1920, "height": 1080})
+            browser = p.chromium.launch(headless=False,args=["--start-maximized"])
+            context = browser.new_context(no_viewport=True)
             page = context.new_page()
             page.goto(seeking_alpha_url)
             page.get_by_placeholder("Enter email address").fill(generated_email)
