@@ -7,10 +7,24 @@ import requests, json
 from io import StringIO
 import os
 from pydantic_settings import BaseSettings, SettingsConfigDict
+import logging
+
+from degiro_repo.company_info import Degiro
+
+# Create and configure logger
+logging.basicConfig(
+                    format='%(asctime)s %(message)s',
+                    )
+
+# Creating an object
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
 class Settings(BaseSettings):
     USERNAME:str
     PASSWORD:str
     TOTP_SECRET_KEY:str
+    USER_TOKEN:str
+    INT_ACCOUNT:str
     
     model_config = SettingsConfigDict(env_file=".env")
 
@@ -65,6 +79,7 @@ with Stealth().use_sync(sync_playwright()) as p:
     page.goto("https://trader.degiro.nl/login/nl#/login")
     page.get_by_text("Accept all").click()
     print(page.title())
+    logger.info("Opening Degiro Site...")
     settings = Settings() # type: ignore
 
     page.get_by_label("Gebruikersnaam").fill(settings.USERNAME)
@@ -73,6 +88,7 @@ with Stealth().use_sync(sync_playwright()) as p:
     one_time_password = str(pyotp.TOTP(settings.TOTP_SECRET_KEY).now())
     page.get_by_placeholder("012345").fill(one_time_password)
     page.get_by_text("Bevestig", exact=True).click()
+    logger.info("Login Succesfull")
     page.locator("a[data-name='portfolioMenuItem']").click()
     page.wait_for_selector("span[data-name='stock']")
 
@@ -85,7 +101,7 @@ with Stealth().use_sync(sync_playwright()) as p:
     df_stocks: pl.DataFrame = (
         pl.from_pandas(initial_read_tables[0])
         .with_columns(
-            Product=pl.col("Product").str.replace("KV", "").str.head(-1),
+            Product=pl.col("Product").str.replace("KV", "").str.replace(r".$", ""),
             ONGEREALISEERDE_WV_EUR=pl.col("Ongerealiseerde W/V\xa0€")
             .str.extract(ongerealiseerde_wv_regex, 1)
             .str.replace_all(r"\.", "")
@@ -190,7 +206,7 @@ with Stealth().use_sync(sync_playwright()) as p:
         ISIN=pl.when(pl.col("Symbool | ISIN").str.split("|").list.len() == 1)
         .then(pl.col("Symbool | ISIN"))
         .otherwise(
-            pl.col("Symbool | ISIN").str.split("|").list.get(index=1, null_on_oob=True)
+            pl.col("Symbool | ISIN").str.split("|").list.get(index=1)
         )
     )
 
@@ -208,6 +224,7 @@ with Stealth().use_sync(sync_playwright()) as p:
         )["products"][0]["code"]
         for i in isins
     }
+    logger.info("Looking up Isins....")
     # sg_code_lookup = [json.loads(requests.get(f"https://sgbeurs.nl/quicksearch/quicksearch?term={i}").content.decode()) for i in sg_isin_lookup_code]
     sg_pid_lookup = {
         v: json.loads(
@@ -251,6 +268,7 @@ with Stealth().use_sync(sync_playwright()) as p:
     isin_to_onderliggende_waarde_isin = {
         k: isin_to_underlying_isin[v] for k, v in sg_isin_lookup_code.items()
     }
+    logger.info("Done looking up Isins for Turbos....")
     df_unioned_turbos_with_underlying = with_isin.with_columns(
         UNDERLYING_ISIN=pl.when(pl.col("SECURITY_TYPE") != "STOCK")
         .then(pl.col("ISIN").replace(isin_to_onderliggende_waarde_isin))
@@ -269,6 +287,42 @@ with Stealth().use_sync(sync_playwright()) as p:
         .with_columns(UNDERLYING=pl.col("UNDERLYING_RIGHT"))
         .select(OUTPUT_COLS)
     )
-    df_unioned_turbos_final.write_excel(column_totals=True, autofit=True)
+
+    # Enrich by company info
+    isin_to_company_sector = {}
+    isin_to_company_industry = {}
+    degiro = Degiro()
+    underlying_isins= df_unioned_turbos_final.select("UNDERLYING_ISIN").unique().to_numpy()
+
+    for isin in underlying_isins:
+        company_profile = degiro.degiro_connector.get_company_profile(
+            product_isin=isin[0]
+        )
+        isin_to_company_sector[isin[0]] = company_profile.data["sector"]
+        isin_to_company_industry[isin[0]] = company_profile.data["industry"]
+    
+    df_add_company_profiles_of_underlying = df_unioned_turbos_final.with_columns(
+        SECTOR = pl.col("UNDERLYING_ISIN").replace(isin_to_company_sector),
+        INDUSTRY = pl.col("UNDERLYING_ISIN").replace(isin_to_company_industry)
+    )
+    
+
+    
+    
+
+    df_add_company_profiles_of_underlying.write_excel(column_totals=True, autofit=True)
     browser.close()
-os.startfile("pivot_table.xlsx")
+
+
+underlying_isins= df_unioned_turbos_final.select("UNDERLYING_ISIN").unique().to_numpy()
+product_isin = "VGG320891077"
+company_profile = trading_api.get_company_profile(
+    product_isin=product_isin,
+    raw=True,
+)
+
+# # DISPLAY DATA
+company_profile["data"]["sector"]
+company_profile["data"]["industry"]
+
+# os.startfile("pivot_table.xlsx")

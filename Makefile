@@ -1,5 +1,5 @@
 devenv:
-	poetry config virtualenvs.in-project true && poetry install --noroot && playwright install --with-deps chromium
+	poetry config virtualenvs.in-project true && poetry install --noroot && poetry run playwright install --with-deps chromium
 
 summarize:
 	poetry run python -m main.py
