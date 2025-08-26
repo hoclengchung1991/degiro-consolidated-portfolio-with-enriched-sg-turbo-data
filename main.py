@@ -1,328 +1,88 @@
-from playwright.sync_api import sync_playwright
-from playwright_stealth import Stealth
-import pyotp
-import pandas as pd
+from typing import Any
+from degiro_connector.trading.api import API
 import polars as pl
-import requests, json
-from io import StringIO
-import os
-from pydantic_settings import BaseSettings, SettingsConfigDict
-import logging
+from repos.company_info import Degiro
+from repos.degiro import DegiroRepo
+from repos.etoro import EtoroRepo
+from repos.sg_uisins import lookup_underlying_isin_from_sg_for_sg_turbos
+from repos.zero import ZeroRepo
 
-from degiro_repo.company_info import Degiro
+degiro_repo = DegiroRepo()
+degiro_portfolio: pl.DataFrame = degiro_repo.consolidated_degiro_initial_df
 
-# Create and configure logger
-logging.basicConfig(
-                    format='%(asctime)s %(message)s',
-                    )
+etoro_repo = EtoroRepo()
+etoro_portfolio_ex_cash: pl.DataFrame = etoro_repo.etoro_portfolio_ex_cash
+isin_to_underlying_isin_etoro: dict[str, str] = etoro_repo.isin_to_underlying_isin_etoro
 
-# Creating an object
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
-class Settings(BaseSettings):
-    USERNAME:str
-    PASSWORD:str
-    TOTP_SECRET_KEY:str
-    USER_TOKEN:str
-    INT_ACCOUNT:str
-    
-    model_config = SettingsConfigDict(env_file=".env")
+zero_repo = ZeroRepo()
+zero_portfolio: pl.DataFrame = zero_repo.zero_portfolio
+isin_to_underlying_isin_zero: dict[str, str] = zero_repo.isin_to_underlying_isin_zero
 
 
-STOCK_SELECT_COLS = [
-    "Product",
-    "Symbool | ISIN",
-    "Beurs",
-    "SECURITY_TYPE",
-    "HEFBOOM",
-    "STOPLOSS",
-    "Aantal",
-    "Koers",
-    "Valuta",
-    "INITIELE_WAARDE",
-    "Waarde",
-    "GAK",
-    "W/V\xa0€",
-    "W/V %",
-    "ONGEREALISEERDE_WV_EUR",
-    "ONGEREALISEERDE_WV_PCT",
-    "Totale W/V€",
-]
 
-OUTPUT_COLS = [
-    "Product",
-    "Symbool | ISIN",
-    "Beurs",
-    "SECURITY_TYPE",
-    "HEFBOOM",
-    "STOPLOSS",
-    "Aantal",
-    "Koers",
-    "Valuta",
-    "INITIELE_WAARDE",
-    "Waarde",
-    "GAK",
-    "W/V\xa0€",
-    "W/V %",
-    "ONGEREALISEERDE_WV_EUR",
-    "ONGEREALISEERDE_WV_PCT",
-    "Totale W/V€",
-    "ISIN",
-    "UNDERLYING_ISIN",
-    "UNDERLYING",
-]
-
-with Stealth().use_sync(sync_playwright()) as p:
-    browser = p.chromium.launch(headless=False)
-    context = browser.new_context(viewport={"width": 1920, "height": 1080})
-    page = context.new_page()
-    page.goto("https://trader.degiro.nl/login/nl#/login")
-    page.get_by_text("Accept all").click()
-    print(page.title())
-    logger.info("Opening Degiro Site...")
-    settings = Settings() # type: ignore
-
-    page.get_by_label("Gebruikersnaam").fill(settings.USERNAME)
-    page.get_by_label("Wachtwoord").fill(settings.PASSWORD)
-    page.get_by_text("Inloggen", exact=True).click()
-    one_time_password = str(pyotp.TOTP(settings.TOTP_SECRET_KEY).now())
-    page.get_by_placeholder("012345").fill(one_time_password)
-    page.get_by_text("Bevestig", exact=True).click()
-    logger.info("Login Succesfull")
-    page.locator("a[data-name='portfolioMenuItem']").click()
-    page.wait_for_selector("span[data-name='stock']")
-
-    # Format stocks df    
-    ongerealiseerde_wv_regex = r"([+-]\d+,\d{2})\xA0\(([+-]\d+,\d{2})%\)"
-    negative_values = True
-    # while negative_values:
-    content = StringIO(page.content())
-    initial_read_tables = pd.read_html(content, thousands="", decimal=".")
-    df_stocks: pl.DataFrame = (
-        pl.from_pandas(initial_read_tables[0])
-        .with_columns(
-            Product=pl.col("Product").str.replace("KV", "").str.replace(r".$", ""),
-            ONGEREALISEERDE_WV_EUR=pl.col("Ongerealiseerde W/V\xa0€")
-            .str.extract(ongerealiseerde_wv_regex, 1)
-            .str.replace_all(r"\.", "")
-            .str.replace_all(",", ".")
-            .cast(pl.Float64),
-            ONGEREALISEERDE_WV_PCT=pl.col("Ongerealiseerde W/V\xa0€")
-            .str.extract(ongerealiseerde_wv_regex, 2)
-            .str.replace_all(r"\.", "")
-            .str.replace_all(",", ".")
-            .cast(pl.Float64),
-            Waarde=(
-                pl.col("Waarde")
-                .str.replace_all(r"\.", "")
-                .str.replace_all(",", ".")
-                .cast(pl.Float64)
-            ).round(2),
-            GAK=pl.col("GAK").str.replace_all(",", ".").cast(pl.Float64),
-            SECURITY_TYPE=pl.lit("STOCK"),
-            HEFBOOM=pl.lit(1.0),
-            STOPLOSS=pl.lit(0.0),
-        )
-        .with_columns(
-            pl.col("Totale W/V€")
-            .str.replace_all(r"\.", "")
-            .str.replace_all(",", ".")
-            .cast(pl.Float64),
-            pl.col("W/V\xa0€")
-            .str.replace_all(r"\.", "")
-            .str.replace_all(",", ".")
-            .cast(pl.Float64),
-            (pl.col("Waarde") - pl.col("ONGEREALISEERDE_WV_EUR")).alias(
-                "INITIELE_WAARDE"
-            ),
-        )
-    ).select(STOCK_SELECT_COLS)
-    negative_values:bool = df_stocks.select("Waarde").limit(1).item() <= 0
-        
-
-    # Format turbos df
-    df_turbos: pl.DataFrame = (
-        pl.from_pandas(initial_read_tables[1])
-        .with_columns(
-            Product=pl.col("Product").str.replace("KV", "").str.slice(2),
-            STOCK_NAME=pl.col("Product")
-            .str.replace(r"Factor|Classic|BEST|Warrant", ";")
-            .str.split(";")
-            .list[0]
-            .str.split(" ")
-            .list.slice(1)
-            .list.join(" "),
-            SECURITY_TYPE=pl.col("Product").str.extract(
-                r"(Factor|Classic|BEST|Warrant)"
-            ),
-            STOPLOSS=pl.when(
-                pl.col("Product").str.extract(pattern=r"SL (\d+\.\d+)").is_not_null()
-            )
-            .then(
-                pl.col("Product").str.extract(pattern=r"SL (\d+\.\d+)").cast(pl.Float64)
-            )
-            .otherwise(pl.lit(0.0)),
-            ONGEREALISEERDE_WV_EUR=pl.col("Ongerealiseerde W/V\xa0€")
-            .str.extract(ongerealiseerde_wv_regex, 1)
-            .str.replace_all(r"\.", "")
-            .str.replace_all(",", ".")
-            .cast(pl.Float64),
-            ONGEREALISEERDE_WV_PCT=pl.col("Ongerealiseerde W/V\xa0€")
-            .str.extract(ongerealiseerde_wv_regex, 2)
-            .str.replace_all(r"\.", "")
-            .str.replace_all(",", ".")
-            .cast(pl.Float64),
-            HEFBOOM=(
-                pl.col("Product").str.extract(r"(LE*V )(\d+)(\.\d+)*", 2)
-                + pl.col("Product")
-                .str.extract(r"(LE*V )(\d+)(\.\d+)*", 3)
-                .fill_null("")
-            ).cast(pl.Float64),
-            Waarde=(
-                pl.col("Waarde")
-                .str.replace_all(r"\.", "")
-                .str.replace_all(",", ".")
-                .cast(pl.Float64)
-            ).round(2),
-            GAK=pl.col("GAK").str.replace_all(",", ".").cast(pl.Float64),
-        )
-        .with_columns(
-            pl.col("Totale W/V€")
-            .str.replace_all(r"\.", "")
-            .str.replace_all(",", ".")
-            .cast(pl.Float64),
-            pl.col("W/V\xa0€")
-            .str.replace_all(r"\.", "")
-            .str.replace_all(",", ".")
-            .cast(pl.Float64),
-            (pl.col("Waarde") - pl.col("ONGEREALISEERDE_WV_EUR")).alias(
-                "INITIELE_WAARDE"
-            ),
-        )
-        .select(STOCK_SELECT_COLS)
-    )
-    unioned: pl.DataFrame = pl.concat([df_turbos, df_stocks])
-    with_isin = unioned.with_columns(
-        ISIN=pl.when(pl.col("Symbool | ISIN").str.split("|").list.len() == 1)
-        .then(pl.col("Symbool | ISIN"))
-        .otherwise(
-            pl.col("Symbool | ISIN").str.split("|").list.get(index=1)
-        )
-    )
-
-    isins: list[str] = [
-        isin[0]
-        for isin in with_isin.filter(pl.col("SECURITY_TYPE") != "STOCK")
-        .select("ISIN")
-        .to_numpy()
-    ]
-    sg_isin_lookup_code = {
-        i: json.loads(
-            requests.get(
-                f"https://sgbeurs.nl/quicksearch/quicksearch?term={i}"
-            ).content.decode()
-        )["products"][0]["code"]
-        for i in isins
-    }
-    logger.info("Looking up Isins....")
-    # sg_code_lookup = [json.loads(requests.get(f"https://sgbeurs.nl/quicksearch/quicksearch?term={i}").content.decode()) for i in sg_isin_lookup_code]
-    sg_pid_lookup = {
-        v: json.loads(
-            requests.get(
-                f"https://sgbeurs.nl/EmcWebApi/api/Products?code={v}"
-            ).content.decode()
-        )["Id"]
-        for _, v in sg_isin_lookup_code.items()
-    }
-    import time
-
-    isin_to_underlying = {}
-    isin_to_underlying_isin = {}
-    for k, v in sg_pid_lookup.items():
-        response = requests.get(
-            f"https://sgbeurs.nl/EmcWebApi/api/Products/AllProperties/{v}"
-        )
-        content = response.content.decode()
-        while "exceeded" in content:
-            time.sleep(1)
-            response = requests.get(
-                f"https://sgbeurs.nl/EmcWebApi/api/Products/AllProperties/{v}"
-            )
-            content = response.content.decode()
-        underlying = [
-            element
-            for element in json.loads(content)
-            if element["Label"] == "Onderliggende waarde"
-        ][0]["Value"]
-        underlying_isin = [
-            element
-            for element in json.loads(content)
-            if element["Label"] == "ISIN code onderliggende waarde"
-        ][0]["Value"]
-        isin_to_underlying_isin[k] = underlying_isin
-        isin_to_underlying[k] = underlying
-
-    isin_to_onderliggende_waarde = {
-        k: isin_to_underlying[v] for k, v in sg_isin_lookup_code.items()
-    }
-    isin_to_onderliggende_waarde_isin = {
-        k: isin_to_underlying_isin[v] for k, v in sg_isin_lookup_code.items()
-    }
-    logger.info("Done looking up Isins for Turbos....")
-    df_unioned_turbos_with_underlying = with_isin.with_columns(
-        UNDERLYING_ISIN=pl.when(pl.col("SECURITY_TYPE") != "STOCK")
-        .then(pl.col("ISIN").replace(isin_to_onderliggende_waarde_isin))
-        .otherwise(pl.col("ISIN")),
-        UNDERLYING=pl.when(pl.col("SECURITY_TYPE") != "STOCK")
-        .then(pl.col("ISIN").replace(isin_to_onderliggende_waarde))
-        .otherwise(pl.col("Product")),
-    ).with_columns(UNDERLYING_ISIN=pl.col("UNDERLYING_ISIN").str.strip_chars())
-    underlying_isin_to_underlying_final = df_unioned_turbos_with_underlying.group_by(
-        pl.col("UNDERLYING_ISIN").str.strip_chars()
-    ).agg(pl.first("UNDERLYING").alias("UNDERLYING_RIGHT"))
-    df_unioned_turbos_final = (
-        df_unioned_turbos_with_underlying.join(
-            underlying_isin_to_underlying_final, on="UNDERLYING_ISIN", how="left"
-        )
-        .with_columns(UNDERLYING=pl.col("UNDERLYING_RIGHT"))
-        .select(OUTPUT_COLS)
-    )
-
-    # Enrich by company info
-    isin_to_company_sector = {}
-    isin_to_company_industry = {}
-    degiro = Degiro()
-    underlying_isins= df_unioned_turbos_final.select("UNDERLYING_ISIN").unique().to_numpy()
-
-    for isin in underlying_isins:
-        company_profile = degiro.degiro_connector.get_company_profile(
-            product_isin=isin[0]
-        )
-        isin_to_company_sector[isin[0]] = company_profile.data["sector"]
-        isin_to_company_industry[isin[0]] = company_profile.data["industry"]
-    
-    df_add_company_profiles_of_underlying = df_unioned_turbos_final.with_columns(
-        SECTOR = pl.col("UNDERLYING_ISIN").replace(isin_to_company_sector),
-        INDUSTRY = pl.col("UNDERLYING_ISIN").replace(isin_to_company_industry)
-    )
-    
-
-    
-    
-
-    df_add_company_profiles_of_underlying.write_excel(column_totals=True, autofit=True)
-    browser.close()
-
-
-underlying_isins= df_unioned_turbos_final.select("UNDERLYING_ISIN").unique().to_numpy()
-product_isin = "VGG320891077"
-company_profile = trading_api.get_company_profile(
-    product_isin=product_isin,
-    raw=True,
+unioned: pl.DataFrame = pl.concat(
+    [degiro_portfolio, etoro_portfolio_ex_cash, zero_portfolio]
 )
 
-# # DISPLAY DATA
-company_profile["data"]["sector"]
-company_profile["data"]["industry"]
 
-# os.startfile("pivot_table.xlsx")
+# Lookup underlying isin
+sg_tb_isins: list[str] = [
+    i[0]
+    for i in degiro_portfolio.filter(pl.col("SECURITY_TYPE") != "STOCK")
+    .select("ISIN")
+    .unique()
+    .to_numpy()
+]
+stock_isins: list[str] = [
+    i[0]
+    for i in degiro_portfolio.filter(pl.col("SECURITY_TYPE") == "STOCK")
+    .select("ISIN")
+    .unique()
+    .to_numpy()
+]
+stock_isin_underlying_isin: dict[str, str] = {isin: isin for isin in stock_isins}
+looked_up_sg_tb_underlying_isins: dict[str, str] = (
+    lookup_underlying_isin_from_sg_for_sg_turbos(sg_tb_isins)
+)
+isin_to_underlying_isin: dict[str, str] = (
+    stock_isin_underlying_isin
+    | looked_up_sg_tb_underlying_isins
+    | isin_to_underlying_isin_zero
+    | isin_to_underlying_isin_etoro
+)
+
+with_underlying_isin: pl.DataFrame = unioned.with_columns(
+    UNDERLYING_ISIN=pl.col("ISIN").replace(isin_to_underlying_isin)
+)
+
+# lookup underlying name, sector,
+# Enrich by company info
+isin_to_company_sector = {}
+isin_to_company_industry = {}
+isin_to_name = {}
+degiro: API = Degiro().degiro_connector
+
+for isin in with_underlying_isin["UNDERLYING_ISIN"].to_list():
+    company_profile = degiro.get_company_profile(product_isin=isin)
+    if isin is None:
+        raise Exception("Most likely forgot to add underlying to the notes of finanzen Zero")
+    isin_to_company_sector[isin] = company_profile.data["sector"]
+    isin_to_company_industry[isin] = company_profile.data["industry"]
+    isin_to_name[isin] = company_profile.data["contacts"]["NAME"]
+
+with_underlying_info = with_underlying_isin.with_columns(
+    UNDERLYING=pl.col("UNDERLYING_ISIN").replace(isin_to_name),
+    SECTOR=pl.col("UNDERLYING_ISIN").replace(isin_to_company_sector),
+    INDUSTRY=pl.col("UNDERLYING_ISIN").replace(isin_to_company_industry),
+)
+
+# Add cash
+degiro_cash_eur_df: pl.DataFrame = degiro_repo.degiro_cash_eur_df
+etoro_cash_eur_df: pl.DataFrame = etoro_repo.etoro_portfolio_cash
+zero_cash_eur_df: pl.DataFrame = zero_repo.zero_cash_eur_df
+
+cash_consolidated: pl.DataFrame = pl.concat([degiro_cash_eur_df, etoro_cash_eur_df, zero_cash_eur_df])
+
+final_consolidated_portfolio: pl.DataFrame = pl.concat([with_underlying_info, cash_consolidated])
+
+final_consolidated_portfolio.write_excel(column_totals=True, autofit=True)
