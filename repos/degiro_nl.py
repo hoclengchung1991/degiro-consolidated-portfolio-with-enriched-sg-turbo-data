@@ -4,7 +4,7 @@ import pyotp
 import pandas as pd
 import polars as pl
 from io import StringIO
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from repos.utils.shared import DegiroSettings
 import logging
 
 from repos.utils.shared import CASH_SCHEMA, INITIAL_COLS
@@ -14,23 +14,18 @@ logging.basicConfig(
     format="%(asctime)s %(message)s",
 )
 import time
+
 # Creating an object
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 
-class Settings(BaseSettings):
-    USERNAME: str
-    PASSWORD: str
-    TOTP_SECRET_KEY: str
-    USER_TOKEN: str
-    INT_ACCOUNT: str
 
-    model_config = SettingsConfigDict(env_file=".env")
 
-class DegiroRepo():
+class DegiroRepoNL:
     consolidated_degiro_initial_df: pl.DataFrame
     degiro_cash_eur_df: pl.DataFrame
+
     def __init__(self):
         with Stealth().use_sync(sync_playwright()) as p:
             browser = p.chromium.launch(headless=False)
@@ -40,7 +35,7 @@ class DegiroRepo():
             page.get_by_text("Accept all").click()
             print(page.title())
             logger.info("Opening Degiro Site...")
-            settings = Settings()  # type: ignore
+            settings = DegiroSettings()  # type: ignore
 
             page.get_by_label("Gebruikersnaam").fill(settings.USERNAME)
             page.get_by_label("Wachtwoord").fill(settings.PASSWORD)
@@ -62,7 +57,9 @@ class DegiroRepo():
             df_stocks: pl.DataFrame = (
                 pl.from_pandas(initial_read_tables[0])
                 .with_columns(
-                    Product=pl.col("Product").str.replace("KV", "").str.replace(r".$", ""),
+                    Product=pl.col("Product")
+                    .str.replace("KV", "")
+                    .str.replace(r".$", ""),
                     ONGEREALISEERDE_WV_EUR=pl.col("Ongerealiseerde W/V\xa0€")
                     .str.extract(ongerealiseerde_wv_regex, 1)
                     .str.replace_all(r"\.", "")
@@ -96,34 +93,44 @@ class DegiroRepo():
                     (pl.col("Waarde") - pl.col("ONGEREALISEERDE_WV_EUR")).alias(
                         "INITIELE_WAARDE"
                     ),
-                ).with_columns(
-                ISIN=pl.when(pl.col("Symbool | ISIN").str.split("|").list.len() == 1)
-                .then(pl.col("Symbool | ISIN"))
-                .otherwise(pl.col("Symbool | ISIN").str.split("|").list.get(index=1))
-            )
+                )
+                .with_columns(
+                    ISIN=pl.when(
+                        pl.col("Symbool | ISIN").str.split("|").list.len() == 1
+                    )
+                    .then(pl.col("Symbool | ISIN"))
+                    .otherwise(
+                        pl.col("Symbool | ISIN").str.split("|").list.get(index=1)
+                    ),
+                    BROKER=pl.lit("Degiro NL")
+                )
             ).select(INITIAL_COLS)
-            negative_values: bool = df_stocks.select("Waarde").limit(1).item() <= 0
+            
 
             # Format turbos df
             df_turbos: pl.DataFrame = (
                 pl.from_pandas(initial_read_tables[1])
                 .with_columns(
                     Product=pl.col("Product").str.replace("KV", "").str.slice(2),
-                    STOCK_NAME=pl.col("Product")
-                    .str.replace(r"Factor|Classic|BEST|Warrant", ";")
-                    .str.split(";")
-                    .list[0]
-                    .str.split(" ")
-                    .list.slice(1)
-                    .list.join(" "),
+                    # STOCK_NAME=pl.col("Product")
+                    # .str.replace(r"Factor|Classic|BEST|Warrant", ";")
+                    # .str.split(";")
+                    # .list[0]
+                    # .str.split(" ")
+                    # .list.slice(1)
+                    # .list.join(" "),
                     SECURITY_TYPE=pl.col("Product").str.extract(
                         r"(Factor|Classic|BEST|Warrant)"
                     ),
                     STOPLOSS=pl.when(
-                        pl.col("Product").str.extract(pattern=r"SL (\d+\.\d+)").is_not_null()
+                        pl.col("Product")
+                        .str.extract(pattern=r"SL (\d+\.\d+)")
+                        .is_not_null()
                     )
                     .then(
-                        pl.col("Product").str.extract(pattern=r"SL (\d+\.\d+)").cast(pl.Float64)
+                        pl.col("Product")
+                        .str.extract(pattern=r"SL (\d+\.\d+)")
+                        .cast(pl.Float64)
                     )
                     .otherwise(pl.lit(0.0)),
                     ONGEREALISEERDE_WV_EUR=pl.col("Ongerealiseerde W/V\xa0€")
@@ -162,15 +169,24 @@ class DegiroRepo():
                     (pl.col("Waarde") - pl.col("ONGEREALISEERDE_WV_EUR")).alias(
                         "INITIELE_WAARDE"
                     ),
-                ).with_columns(
-                ISIN=pl.when(pl.col("Symbool | ISIN").str.split("|").list.len() == 1)
-                .then(pl.col("Symbool | ISIN"))
-                .otherwise(pl.col("Symbool | ISIN").str.split("|").list.get(index=1))
+                )
+                .with_columns(
+                    ISIN=pl.when(
+                        pl.col("Symbool | ISIN").str.split("|").list.len() == 1
+                    )
+                    .then(pl.col("Symbool | ISIN"))
+                    .otherwise(
+                        pl.col("Symbool | ISIN").str.split("|").list.get(index=1)
+                    ),
+                    BROKER=pl.lit("Degiro NL")
                 )
                 .select(INITIAL_COLS)
             )
             unioned: pl.DataFrame = pl.concat([df_turbos, df_stocks])
-            self.consolidated_degiro_initial_df = unioned.with_columns(Aantal=pl.col("Aantal").cast(pl.Float64), ISIN=pl.col("ISIN").str.strip_chars())
+            self.consolidated_degiro_initial_df = unioned.with_columns(
+                Aantal=pl.col("Aantal").cast(pl.Float64),
+                ISIN=pl.col("ISIN").str.strip_chars()                
+            )
 
             # Cash
             total_cash_eur_degiro: float = float(
@@ -182,11 +198,11 @@ class DegiroRepo():
                 .replace(",", ".")
                 .strip()
             )
-            
+
             degiro_cash_eur_df = pl.DataFrame(
-                {                    
+                {
                     "ISIN": ["EUR"],
-                    "Beurs": ["DEGIRO"],
+                    "BROKER": ["DEGIRO_NL"],
                     "SECURITY_TYPE": ["CASH"],
                     "HEFBOOM": [1.0],
                     "STOPLOSS": [0.0],
@@ -199,15 +215,12 @@ class DegiroRepo():
                     "W/V\xa0€": [0.0],
                     "W/V %": ["0%"],
                     "ONGEREALISEERDE_WV_EUR": [0.0],
-                    "ONGEREALISEERDE_WV_PCT": [0.0],                    
+                    "ONGEREALISEERDE_WV_PCT": [0.0],
                     "UNDERLYING_ISIN": ["EUR"],
                     "UNDERLYING": ["EUR"],
                     "SECTOR": ["CASH"],
                     "INDUSTRY": ["CASH"],
                 },
-                schema_overrides=CASH_SCHEMA
+                schema_overrides=CASH_SCHEMA,
             )
             self.degiro_cash_eur_df = degiro_cash_eur_df
-            
-
-

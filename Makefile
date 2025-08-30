@@ -5,4 +5,4 @@ summarize:
 	poetry run python -m main.py
 
 unblocksa:
-	poetry run python -m sa.py
+	poetry run python -m sa.py $(url)

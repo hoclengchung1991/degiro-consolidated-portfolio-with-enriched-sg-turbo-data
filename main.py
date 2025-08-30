@@ -2,13 +2,18 @@ from typing import Any
 from degiro_connector.trading.api import API
 import polars as pl
 from repos.company_info import Degiro
-from repos.degiro import DegiroRepo
+from repos.degiro_nl import DegiroRepoNL
+from repos.degiro_de import DegiroRepoDE
 from repos.etoro import EtoroRepo
 from repos.sg_uisins import lookup_underlying_isin_from_sg_for_sg_turbos
 from repos.zero import ZeroRepo
 
-degiro_repo = DegiroRepo()
-degiro_portfolio: pl.DataFrame = degiro_repo.consolidated_degiro_initial_df
+
+degiro_repo_de = DegiroRepoDE()
+degiro_portfolio_de: pl.DataFrame = degiro_repo_de.consolidated_degiro_initial_df
+
+degiro_repo_nl = DegiroRepoNL()
+degiro_portfolio_nl: pl.DataFrame = degiro_repo_nl.consolidated_degiro_initial_df
 
 etoro_repo = EtoroRepo()
 etoro_portfolio_ex_cash: pl.DataFrame = etoro_repo.etoro_portfolio_ex_cash
@@ -21,21 +26,25 @@ isin_to_underlying_isin_zero: dict[str, str] = zero_repo.isin_to_underlying_isin
 
 
 unioned: pl.DataFrame = pl.concat(
-    [degiro_portfolio, etoro_portfolio_ex_cash, zero_portfolio]
+    [degiro_portfolio_de, degiro_portfolio_nl, etoro_portfolio_ex_cash, zero_portfolio]
+)
+
+degiro_unioned: pl.DataFrame = pl.concat(
+    [degiro_portfolio_de, degiro_portfolio_nl]
 )
 
 
-# Lookup underlying isin
+# Lookup underlying isin Degiro
 sg_tb_isins: list[str] = [
     i[0]
-    for i in degiro_portfolio.filter(pl.col("SECURITY_TYPE") != "STOCK")
+    for i in degiro_unioned.filter(pl.col("SECURITY_TYPE") != "STOCK")
     .select("ISIN")
     .unique()
     .to_numpy()
 ]
 stock_isins: list[str] = [
     i[0]
-    for i in degiro_portfolio.filter(pl.col("SECURITY_TYPE") == "STOCK")
+    for i in degiro_unioned.filter(pl.col("SECURITY_TYPE") == "STOCK")
     .select("ISIN")
     .unique()
     .to_numpy()
@@ -77,11 +86,12 @@ with_underlying_info = with_underlying_isin.with_columns(
 )
 
 # Add cash
-degiro_cash_eur_df: pl.DataFrame = degiro_repo.degiro_cash_eur_df
+degiro_de_cash_eur_df: pl.DataFrame = degiro_repo_de.degiro_cash_eur_df
+degiro_nl_cash_eur_df: pl.DataFrame = degiro_repo_nl.degiro_cash_eur_df
 etoro_cash_eur_df: pl.DataFrame = etoro_repo.etoro_portfolio_cash
 zero_cash_eur_df: pl.DataFrame = zero_repo.zero_cash_eur_df
 
-cash_consolidated: pl.DataFrame = pl.concat([degiro_cash_eur_df, etoro_cash_eur_df, zero_cash_eur_df])
+cash_consolidated: pl.DataFrame = pl.concat([degiro_de_cash_eur_df, degiro_nl_cash_eur_df, etoro_cash_eur_df, zero_cash_eur_df])
 
 final_consolidated_portfolio: pl.DataFrame = pl.concat([with_underlying_info, cash_consolidated])
 

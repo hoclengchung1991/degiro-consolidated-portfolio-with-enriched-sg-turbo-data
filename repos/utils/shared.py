@@ -1,9 +1,8 @@
 import polars as pl
-INITIAL_COLS = [
-    # "Product",
-    # "Symbool | ISIN",
+from pydantic_settings import BaseSettings, SettingsConfigDict
+INITIAL_COLS = [    
     "ISIN",
-    "Beurs",
+    "BROKER",
     "SECURITY_TYPE",
     "HEFBOOM",
     "STOPLOSS",
@@ -17,13 +16,11 @@ INITIAL_COLS = [
     "W/V %",
     "ONGEREALISEERDE_WV_EUR",
     "ONGEREALISEERDE_WV_PCT",
-    # "Totale W/V€",
-    
 ]
 
 CASH_SCHEMA = {   
     "ISIN": pl.Utf8, 
-    "Beurs": pl.Utf8,
+    "BROKER": pl.Utf8,
     "SECURITY_TYPE": pl.Utf8,
     "HEFBOOM": pl.Float64,
     "STOPLOSS": pl.Float64,
@@ -42,3 +39,16 @@ CASH_SCHEMA = {
     "SECTOR": pl.Utf8,
     "INDUSTRY": pl.Utf8,
 }
+
+
+class DegiroSettings(BaseSettings):
+    USERNAME: str
+    PASSWORD: str
+    TOTP_SECRET_KEY: str
+    USER_TOKEN: str
+    INT_ACCOUNT: str
+    USERNAME_DE: str
+    PASSWORD_DE:str
+    TOTP_SECRET_KEY_DE:str
+
+    model_config = SettingsConfigDict(env_file=".env")

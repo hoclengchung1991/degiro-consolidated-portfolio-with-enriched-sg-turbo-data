@@ -60,7 +60,7 @@ class EtoroRepo:
             ticker_to_isin_for_etoro_df, left_on="ticker", right_on="TICKER", how="left"
         ).with_columns(
             [
-                pl.lit("ETORO").alias("Beurs"),
+                pl.lit("ETORO").alias("BROKER"),
                 pl.when(pl.col("underlying") == "EUR")
                 .then(pl.lit("CASH"))
                 .otherwise(pl.lit("CFD"))

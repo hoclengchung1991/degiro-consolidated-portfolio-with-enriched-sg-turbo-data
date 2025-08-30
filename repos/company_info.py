@@ -1,16 +1,9 @@
 from degiro_connector.trading.api import API as TradingAPI
 from degiro_connector.trading.models.credentials import build_credentials
-from pydantic_settings import BaseSettings, SettingsConfigDict
-class Settings(BaseSettings):
-    USERNAME:str
-    PASSWORD:str
-    TOTP_SECRET_KEY:str
-    USER_TOKEN:str
-    INT_ACCOUNT:str
-    
-    model_config = SettingsConfigDict(env_file="./.env")
+from repos.utils.shared import DegiroSettings
+# .company_info import DegiroSettings
 
-settings = Settings()  # type: ignore
+settings = DegiroSettings()  # type: ignore
 credentials = build_credentials(    
         override={
             "username": settings.USERNAME,

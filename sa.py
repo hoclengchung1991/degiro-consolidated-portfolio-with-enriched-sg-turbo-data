@@ -4,8 +4,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 import random,re,time
 from playwright.sync_api import sync_playwright
 from playwright_stealth import Stealth
-from bs4 import BeautifulSoup
-# importing module
+import sys
 import logging
 
 # Create and configure logger
@@ -20,7 +19,9 @@ logger = logging.getLogger()
 
 num: int = random.randint(1_000_001, 10_000_000)
 pattern = r'https://seekingalpha\.com/auth/registrations/validate/[^\s"\']*&open_reset_password=true\b'
-seeking_alpha_url = input("Enter SA article URL: ")
+
+seeking_alpha_url = sys.argv[1]
+
 class Settings(BaseSettings):
     TEMP_MAIL_TOKEN:str
     RAPID_API_KEY:str

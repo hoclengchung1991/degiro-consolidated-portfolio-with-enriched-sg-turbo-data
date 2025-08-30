@@ -62,13 +62,19 @@ class ZeroRepo:
                     f"https://service.ivestor.de/api/instrument/isin/{isin_to_lookup}"
                 )
             response_decode = json.loads(response.content.decode())
-            isin_to_lev[isin_to_lookup] = response_decode["figuresDerivatives"][
-                "leverage"
-            ]["value"]
-            isin_to_stoploss[isin_to_lookup] = response_decode["koBarrier"]["value"]
+            if "figures" in response_decode:
+                isin_to_lev[isin_to_lookup] = 1
+                isin_to_stoploss[isin_to_lookup] = 0
+            elif "figuresDerivatives" in response_decode:
+                isin_to_lev[isin_to_lookup] = response_decode["figuresDerivatives"][
+                "leverage"]["value"]
+                isin_to_stoploss[isin_to_lookup] = response_decode["koBarrier"]["value"]
+            else:
+                raise Exception("Nothing found in ivestor?")
+            
 
         zero_portfolio_0: pl.DataFrame = zero_df.with_columns(
-            Beurs=pl.lit("Zero"),
+            BROKER=pl.lit("Zero"),
             SECURITY_TYPE=pl.when(pl.col("Art") == "DERIVAT")
             .then(pl.lit("Turbo"))
             .otherwise(pl.lit("STOCK")),
@@ -126,13 +132,13 @@ class ZeroRepo:
         ).item()
 
         with open(f"{base_path}\\{most_recent_portfolio_json_cash_file_name}", "r", encoding="utf-8") as f:
-            cash_amount:float = float(json.load(f)["cash"].replace(".","").replace(",",".").replace("€", ""))
+            cash_amount:float =json.load(f)["cash"]
             
         
-        zewro_cash_eur_df = pl.DataFrame(
+        zero_cash_eur_df = pl.DataFrame(
             {                    
                 "ISIN": ["EUR"],
-                "Beurs": ["ZERO"],
+                "BROKER": ["ZERO"],
                 "SECURITY_TYPE": ["CASH"],
                 "HEFBOOM": [1.0],
                 "STOPLOSS": [0.0],
@@ -153,5 +159,5 @@ class ZeroRepo:
             },
             schema_overrides=CASH_SCHEMA
         )
-        self.zero_cash_eur_df = zewro_cash_eur_df
+        self.zero_cash_eur_df = zero_cash_eur_df
 
