@@ -4,6 +4,7 @@ import pyotp
 import pandas as pd
 import polars as pl
 from io import StringIO
+from repos.nl_sg_turbo_info import fetch_sg_turbo_data_parallel
 from repos.utils.shared import DegiroSettings
 import logging
 
@@ -20,11 +21,11 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 
-
-
 class DegiroRepoNL:
     consolidated_degiro_initial_df: pl.DataFrame
     degiro_cash_eur_df: pl.DataFrame
+    isin_to_underlying_isin_degiro_nl:dict
+    
 
     def __init__(self):
         with Stealth().use_sync(sync_playwright()) as p:
@@ -176,7 +177,7 @@ class DegiroRepoNL:
                     )
                     .then(pl.col("Symbool | ISIN"))
                     .otherwise(
-                        pl.col("Symbool | ISIN").str.split("|").list.get(index=1)
+                        pl.col("Symbool | ISIN").str.split("|").list.get(index=1).str.strip()
                     ),
                     BROKER=pl.lit("Degiro NL")
                 )
@@ -224,3 +225,5 @@ class DegiroRepoNL:
                 schema_overrides=CASH_SCHEMA,
             )
             self.degiro_cash_eur_df = degiro_cash_eur_df
+            
+            self.isin_to_underlying_isin_degiro_nl, _ = fetch_sg_turbo_data_parallel(df_turbos.filter(pl.col("SECURITY_TYPE") != "STOCK")["ISIN"].to_list(), max_workers=10)

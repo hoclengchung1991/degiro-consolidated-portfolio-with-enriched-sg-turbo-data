@@ -5,6 +5,7 @@ import pandas as pd
 import polars as pl
 from io import StringIO
 
+from repos.german_turbo_info import fetch_turbo_data_parallel
 from repos.utils.shared import DegiroSettings
 import logging
 
@@ -27,6 +28,7 @@ logger.setLevel(logging.INFO)
 class DegiroRepoDE:
     consolidated_degiro_initial_df: pl.DataFrame
     degiro_cash_eur_df: pl.DataFrame
+    isin_to_underlying_isin_degiro_de:dict
 
     def __init__(self):
         with Stealth().use_sync(sync_playwright()) as p:
@@ -223,3 +225,4 @@ class DegiroRepoDE:
                 schema_overrides=CASH_SCHEMA,
             )
             self.degiro_cash_eur_df = degiro_cash_eur_df
+            self.isin_to_underlying_isin_degiro_de, _ = fetch_turbo_data_parallel(self.consolidated_degiro_initial_df["ISIN"].to_list())

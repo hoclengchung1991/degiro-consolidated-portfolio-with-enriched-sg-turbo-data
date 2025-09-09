@@ -5,15 +5,18 @@ from repos.company_info import Degiro
 from repos.degiro_nl import DegiroRepoNL
 from repos.degiro_de import DegiroRepoDE
 from repos.etoro import EtoroRepo
+from repos.nl_sg_turbo_info import fetch_sg_turbo_data_parallel
 from repos.sg_uisins import lookup_underlying_isin_from_sg_for_sg_turbos
 from repos.zero import ZeroRepo
 
 
 degiro_repo_de = DegiroRepoDE()
 degiro_portfolio_de: pl.DataFrame = degiro_repo_de.consolidated_degiro_initial_df
+isin_to_underlying_isin_degiro_de:dict[str, str]  = degiro_repo_de.isin_to_underlying_isin_degiro_de
 
 degiro_repo_nl = DegiroRepoNL()
 degiro_portfolio_nl: pl.DataFrame = degiro_repo_nl.consolidated_degiro_initial_df
+isin_to_underlying_isin_degiro_nl:dict[str, str]  = degiro_repo_nl.isin_to_underlying_isin_degiro_nl
 
 etoro_repo = EtoroRepo()
 etoro_portfolio_ex_cash: pl.DataFrame = etoro_repo.etoro_portfolio_ex_cash
@@ -35,13 +38,6 @@ degiro_unioned: pl.DataFrame = pl.concat(
 
 
 # Lookup underlying isin Degiro
-sg_tb_isins: list[str] = [
-    i[0]
-    for i in degiro_unioned.filter(pl.col("SECURITY_TYPE") != "STOCK")
-    .select("ISIN")
-    .unique()
-    .to_numpy()
-]
 stock_isins: list[str] = [
     i[0]
     for i in degiro_unioned.filter(pl.col("SECURITY_TYPE") == "STOCK")
@@ -50,19 +46,19 @@ stock_isins: list[str] = [
     .to_numpy()
 ]
 stock_isin_underlying_isin: dict[str, str] = {isin: isin for isin in stock_isins}
-looked_up_sg_tb_underlying_isins: dict[str, str] = (
-    lookup_underlying_isin_from_sg_for_sg_turbos(sg_tb_isins)
-)
+
+
 isin_to_underlying_isin: dict[str, str] = (
     stock_isin_underlying_isin
-    | looked_up_sg_tb_underlying_isins
+    | isin_to_underlying_isin_degiro_nl
+    | isin_to_underlying_isin_degiro_de
     | isin_to_underlying_isin_zero
     | isin_to_underlying_isin_etoro
 )
 
 with_underlying_isin: pl.DataFrame = unioned.with_columns(
     UNDERLYING_ISIN=pl.col("ISIN").replace(isin_to_underlying_isin)
-)
+).filter(pl.col("UNDERLYING_ISIN").is_not_null())
 
 # lookup underlying name, sector,
 # Enrich by company info

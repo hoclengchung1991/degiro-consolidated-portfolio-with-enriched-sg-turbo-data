@@ -4,6 +4,7 @@ import logging
 import json
 
 from repos.company_info import Degiro
+from repos.german_turbo_info import fetch_turbo_data_parallel
 from repos.utils.shared import CASH_SCHEMA, INITIAL_COLS
 
 # Create and configure logger
@@ -70,9 +71,11 @@ class ZeroRepo:
                 "leverage"]["value"]
                 isin_to_stoploss[isin_to_lookup] = response_decode["koBarrier"]["value"]
             else:
-                raise Exception("Nothing found in ivestor?")
+                isin_to_lev[isin_to_lookup]=0
+                isin_to_stoploss[isin_to_lookup]=0
+                # raise Exception("Nothing found in ivestor?")
             
-
+        turbo_isin_to_underlying_isin, _ = fetch_turbo_data_parallel(zero_df.filter(pl.col("Art") == "DERIVAT")["ISIN"].to_list())
         zero_portfolio_0: pl.DataFrame = zero_df.with_columns(
             BROKER=pl.lit("Zero"),
             SECURITY_TYPE=pl.when(pl.col("Art") == "DERIVAT")
@@ -103,7 +106,7 @@ class ZeroRepo:
             .str.replace_all(r"\.", "")
             .str.replace_all(",", ".")
             .cast(pl.Float64),
-            UNDERLYING_ISIN=pl.col("Notiz"),
+            UNDERLYING_ISIN=pl.col("ISIN").replace(turbo_isin_to_underlying_isin),
         ).with_columns(
             pl.col("Erfolg [EUR]")
             .str.replace_all(r"\.", "")
@@ -118,10 +121,9 @@ class ZeroRepo:
         )
         self.zero_portfolio = zero_portfolio_0.select(INITIAL_COLS)
 
-        self.isin_to_underlying_isin_zero = dict(
-            zero_portfolio_0.select("ISIN", "UNDERLYING_ISIN").rows()
-        )
-
+        self.isin_to_underlying_isin_zero = turbo_isin_to_underlying_isin
+        
+        
         # Add cash
         json_files: pl.DataFrame = df_files.filter(pl.col("file_name").str.ends_with(".json"))
         df_most_recent_portfolio_cash_json_file: pl.DataFrame = (
