@@ -7,6 +7,7 @@ from repos.company_info import Degiro
 from repos.degiro_nl import DegiroRepoNL
 from repos.degiro_de import DegiroRepoDE
 from repos.etoro import EtoroRepo
+from repos.google import get_tickers_from_isins
 from repos.nl_sg_turbo_info import fetch_sg_turbo_data_parallel
 from repos.sg_uisins import lookup_underlying_isin_from_sg_for_sg_turbos
 from repos.utils.shared import get_tradingview_chart_url_by_isin
@@ -102,7 +103,8 @@ final_consolidated_portfolio: pl.DataFrame = pl.concat(
 )
 
 final_consolidated_portfolio.write_excel(column_totals=True, autofit=True)
-
+underlying_isin_list = final_consolidated_portfolio.select("UNDERLYING_ISIN").unique().filter(pl.col("UNDERLYING_ISIN") != "EUR")["UNDERLYING_ISIN"].to_list()
+isin_to_gf_ticker = get_tickers_from_isins(underlying_isin_list)
 tv_to_gf_exchange_mapping = {"EURONEXT": "AMS", "SIX":"SWX", "LSE":"LON", "OMXCOP":"CPH", "XETRA": "ETR"}
 holdings: pl.DataFrame = (
     final_consolidated_portfolio.select("UNDERLYING_ISIN")
@@ -116,6 +118,7 @@ holdings: pl.DataFrame = (
     .with_columns(
         exchange=pl.col("tradingview_link").str.extract(r"symbol=(\w*):(\w*)", 1),
         ticker=pl.col("tradingview_link").str.extract(r"symbol=(\w*):(\w*)", 2),
+        price=pl.col("UNDERLYING_ISIN").replace(isin_to_gf_ticker)
     )
     .select("UNDERLYING_ISIN", "exchange", "ticker", "tradingview_link")
 )
