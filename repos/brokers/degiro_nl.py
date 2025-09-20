@@ -50,8 +50,8 @@ class DegiroRepoNL:
             time.sleep(3)
 
             # Format stocks df
-            ongerealiseerde_wv_regex = r"([+-]\d+,\d{2})\xA0\(([+-]\d+,\d{2})%\)"
-            negative_values = True
+            ongerealiseerde_wv_regex = r"([+-](?:\d{1,3}(?:\.\d{3})*),\d{2})\xA0\(([+-](?:\d{1,3}(?:\.\d{3})*),\d{2})%\)"
+            
             # while negative_values:
             content = StringIO(page.content())
             initial_read_tables = pd.read_html(content, thousands="", decimal=".")
