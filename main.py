@@ -7,12 +7,11 @@ from repos.enrich.company_info import Degiro
 from repos.brokers.degiro_nl import DegiroRepoNL
 from repos.brokers.degiro_de import DegiroRepoDE
 from repos.brokers.etoro import EtoroRepo
-from repos.enrich.google import get_tickers_from_isins
-from repos.utils.shared import get_tradingview_chart_url_by_isin
+from repos.enrich.ticker import get_google_tickers_from_isins, get_yahoo_tickers_from_isins
+from repos.utils.shared import get_tradingview_chart_url_by_keyword
 from repos.brokers.zero import ZeroRepo
 import os
-from gspread.utils import ValueInputOption
-
+from datetime import datetime
 
 degiro_repo_de = DegiroRepoDE()
 degiro_portfolio_de: pl.DataFrame = degiro_repo_de.consolidated_degiro_initial_df
@@ -102,63 +101,22 @@ final_consolidated_portfolio: pl.DataFrame = pl.concat(
     [with_underlying_info, cash_consolidated]
 )
 
-final_consolidated_portfolio.write_excel(column_totals=True, autofit=True)
+output_dir = "portfolio_snapshots"
+os.makedirs(output_dir, exist_ok=True)
+
+# Generate filename with today's date
+today_str = datetime.now().strftime("%Y_%m_%d")
+filename = f"snapshot_{today_str}.xlsx"
+
+# Full path
+output_path = os.path.join(output_dir, filename)
+
+final_consolidated_portfolio.write_excel(output_path,column_totals=True, autofit=True)
 print("Finished Writing to excel. Creating holdings...")
-os.startfile("pivot_table.xlsx")
-underlying_isin_list = final_consolidated_portfolio.select("UNDERLYING_ISIN").unique().filter(pl.col("UNDERLYING_ISIN") != "EUR")["UNDERLYING_ISIN"].to_list()
-isin_to_gf_ticker = get_tickers_from_isins(underlying_isin_list)
+# os.startfile("pivot_table.xlsx")
+# underlying_isin_list = final_consolidated_portfolio.select("UNDERLYING_ISIN").unique().filter(pl.col("UNDERLYING_ISIN") != "EUR")["UNDERLYING_ISIN"].to_list()
 
-holdings: pl.DataFrame = (
-    final_consolidated_portfolio.select("UNDERLYING_ISIN")
-    .unique()
-    .filter(pl.col("UNDERLYING_ISIN") != "EUR")
-    .with_columns(
-        tradingview_link=pl.col("UNDERLYING_ISIN").map_elements(
-            get_tradingview_chart_url_by_isin, return_dtype=pl.Utf8
-        )
-    )
-    .with_columns(
-        exchange=pl.col("tradingview_link").str.extract(r"symbol=(\w*):(\w*)", 1),
-        ticker=pl.col("tradingview_link").str.extract(r"symbol=(\w*):(\w*)", 2),
-        price=pl.concat_str(
-        [pl.lit('=GOOGLEFINANCE("'),pl.col("UNDERLYING_ISIN").replace(isin_to_gf_ticker), pl.lit('")')],
-        separator=""
-        ),
-        currency=pl.concat_str(
-        [pl.lit('=GOOGLEFINANCE("'),pl.col("UNDERLYING_ISIN").replace(isin_to_gf_ticker), pl.lit('","currency")')],
-        separator=""
-        ),
-        changepct=pl.concat_str(
-        [pl.lit('=GOOGLEFINANCE("'),pl.col("UNDERLYING_ISIN").replace(isin_to_gf_ticker), pl.lit('","changepct")')],
-        separator=""
-        ),
-        beta=pl.concat_str(
-        [pl.lit('=GOOGLEFINANCE("'),pl.col("UNDERLYING_ISIN").replace(isin_to_gf_ticker), pl.lit('","beta")')],
-        separator=""
-        ),
-        datadelay=pl.concat_str(
-        [pl.lit('=GOOGLEFINANCE("'),pl.col("UNDERLYING_ISIN").replace(isin_to_gf_ticker), pl.lit('","datadelay")')],
-        separator=""
-        )
-        
-    )
-    .select("UNDERLYING_ISIN", "exchange", "ticker", "tradingview_link","price","currency","changepct","beta","datadelay")
-)
-holdings_pd: pd.DataFrame = holdings.to_pandas()
-scope = [
-    "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive",
-]
-
-
-# Authenticate and create the client
-client = gspread.oauth(
-    scopes=scope,
-    credentials_filename=r"C:\Users\Admin\Documents\degiro\pw\client_secret_353715690187-m3re7sf7gil3emin7bhur5gmd0kancs1.apps.googleusercontent.com.json",
-)
-
-# Open the spreadsheet
-sheet = client.open("Lookup Turbo quotes").worksheet("Holdings")
-sheet.clear()
-sheet.update(values=[holdings_pd.columns.values.tolist()] + holdings_pd.values.tolist(),value_input_option=ValueInputOption.user_entered)
-print("Done uploading holdings to Sheets")
+# with open("current_holding_isins.csv", "w", newline="") as csvfile:
+#     writer = csv.writer(csvfile)
+#     for item in underlying_isin_list:
+#         writer.writerow([item])  # each item becomes one row

@@ -6,3 +6,6 @@ summarize:
 
 unblocksa:
 	poetry run python -m sa.py $(url)
+
+cors-everywhere:
+	node --no-deprecation .\cors_everywhere\corsserver.js 
